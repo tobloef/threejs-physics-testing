@@ -10,6 +10,7 @@ export async function engine() {
 
   const renderer = new THREE.WebGLRenderer({
     canvas: canvasElement,
+    antialias: true,
   });
   renderer.shadowMap.enabled = true;
 
@@ -50,11 +51,13 @@ export async function engine() {
   const dirLight = new THREE.DirectionalLight("white", 3);
   dirLight.position.set(10, 10, 10);
   dirLight.castShadow = true;
+  dirLight.shadow.mapSize = new THREE.Vector2(1024, 1024);
   scene.add(dirLight);
 
   const gridGreyTexture = new THREE.TextureLoader().load(grey);
   gridGreyTexture.wrapT = THREE.RepeatWrapping;
   gridGreyTexture.wrapS = THREE.RepeatWrapping;
+
   const gridGreyMat = new THREE.MeshStandardMaterial({
     map: gridGreyTexture,
   });
@@ -84,10 +87,22 @@ export async function engine() {
   cube2.castShadow = true;
   scene.add(cube2);
 
-  const floorGeo = new THREE.PlaneGeometry(100, 100);
+  const whiteMat = new THREE.MeshStandardMaterial({
+    color: "white",
+  });
+
+  const floorSize = 100;
+
+  const grid = new THREE.GridHelper(floorSize, floorSize, 0x000000, 0x000000);
+  grid.material.opacity = 0.2;
+  grid.material.transparent = true;
+  grid.position.y = 0.001;
+  scene.add(grid);
+
+  const floorGeo = new THREE.PlaneGeometry(floorSize, floorSize);
   const floor = new THREE.Mesh(
     floorGeo,
-    gridGreyMat,
+    whiteMat,
   );
   floor.rotation.x = degToRad(-90);
   floor.receiveShadow = true;

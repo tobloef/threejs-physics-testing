@@ -213,18 +213,13 @@ const getFPS = (): Promise<number> => new Promise(resolve =>
   ),
 )
 
-let fps = 60;
-for (let i = 0; i < 10; i++) {
-  fps = await getFPS();
-  if (fps > 1 && fps < 1000) break;
-}
-console.debug(`FPS: ${fps}`);
+const pps = 60;
 
 function animate() {
   stats.begin();
 
   const factor = 1;
-  world.timestep = 1.0 / fps * factor;
+  world.timestep = 1.0 / pps * factor;
   if (frame++ % factor === 0) world.step();
 
   spinningCube.rotation.x += 0.05;
@@ -246,6 +241,12 @@ function animate() {
   }
 
   renderer.render(scene, camera);
+
+  if (frame === pps * 5) {
+    const snapshop = world.takeSnapshot();
+    console.debug(snapshop);
+    alert(snapshop.reduce((acc, val) => acc + val, 0));
+  }
 
   stats.end();
 

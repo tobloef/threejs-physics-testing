@@ -244,7 +244,6 @@ function animate() {
 
   if (frame === pps * 5) {
     const snapshop = world.takeSnapshot();
-    console.debug(snapshop);
     alert(snapshop.reduce((acc, val) => acc + val, 0));
   }
 

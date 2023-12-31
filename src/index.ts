@@ -1,13 +1,18 @@
-import * as THREE from 'three';
-import {green, grey} from "./textures/grids.ts";
+import * as THREE from "three";
+import {
+  green,
+  grey,
+  red,
+} from "./textures/grids.ts";
+import Stats from "stats.js";
 import type { RigidBody } from "@dimforge/rapier3d";
 
 const RAPIER = await import("@dimforge/rapier3d");
 
-const canvasElement = document.querySelector('canvas');
+const canvasElement = document.querySelector("canvas");
 
 if (!canvasElement) {
-  throw new Error('No canvas element found!');
+  throw new Error("No canvas element found!");
 }
 
 const renderer = new THREE.WebGLRenderer({
@@ -32,7 +37,7 @@ const onResize = () => {
   renderer.setSize(
     rect.width,
     rect.height,
-    false
+    false,
   );
 
   camera.aspect = aspect;
@@ -71,6 +76,13 @@ const gridGreenMat = new THREE.MeshStandardMaterial({
   map: gridGreenTexture,
 });
 
+const gridRedTexture = new THREE.TextureLoader().load(red);
+gridRedTexture.wrapT = THREE.RepeatWrapping;
+gridRedTexture.wrapS = THREE.RepeatWrapping;
+const gridRedMat = new THREE.MeshStandardMaterial({
+  map: gridRedTexture,
+});
+
 const whiteMat = new THREE.MeshStandardMaterial({
   color: "white",
 });
@@ -92,10 +104,19 @@ floor.rotation.x = degToRad(-90);
 floor.receiveShadow = true;
 scene.add(floor);
 
+const spinningCube = new THREE.Mesh(
+  new THREE.BoxGeometry(0.1, 0.1, 0.1),
+  gridRedMat,
+);
+spinningCube.castShadow = true;
+spinningCube.receiveShadow = true;
+spinningCube.position.set(0, 4.5, 4.5);
+scene.add(spinningCube);
+
 function setUvs2(mesh: THREE.Mesh, scale: number = 1) {
-  const pos = mesh.geometry.getAttribute('position');
-  const nor = mesh.geometry.getAttribute('normal');
-  const uvs = mesh.geometry.getAttribute('uv');
+  const pos = mesh.geometry.getAttribute("position");
+  const nor = mesh.geometry.getAttribute("normal");
+  const uvs = mesh.geometry.getAttribute("uv");
 
   for (let i = 0; i < pos.count; i++) {
     let x = 0;
@@ -129,11 +150,11 @@ function setUvs2(mesh: THREE.Mesh, scale: number = 1) {
 
 setUvs2(floor);
 
-const gravity = { x: 0.0, y: -9.81, z: 0.0 };
+const gravity = {x: 0.0, y: -9.81, z: 0.0};
 const world = new RAPIER.World(gravity);
 
 world.createCollider(
-  RAPIER.ColliderDesc.cuboid(100, 0.1, 100)
+  RAPIER.ColliderDesc.cuboid(100, 0.1, 100),
 );
 
 type Cube = {
@@ -143,9 +164,9 @@ type Cube = {
 
 let cubes: Cube[] = [];
 
-let xSize = 6;
-let ySize = 6;
-let zSize = 6
+let xSize = 10;
+let ySize = 5;
+let zSize = 5;
 
 for (let x = 0; x < xSize; x++) {
   for (let y = 0; y < ySize; y++) {
@@ -153,9 +174,9 @@ for (let x = 0; x < xSize; x++) {
       const scale = 0.5;
 
       let rigidBodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(
-        x * scale - xSize/2 * scale,
+        x * scale - xSize / 2 * scale,
         y * scale + 5,
-        z * scale - zSize/2 * scale,
+        z * scale - zSize / 2 * scale,
       );
       let rigidBody = world.createRigidBody(rigidBodyDesc);
       let colliderDesc = RAPIER.ColliderDesc.cuboid(scale / 2, scale / 2, scale / 2);
@@ -178,10 +199,39 @@ for (let x = 0; x < xSize; x++) {
   }
 }
 
-function animate() {
-  world.step();
+const stats = new Stats();
+stats.showPanel(0);
+document.body.appendChild(stats.dom);
 
-  cubes.forEach((cube) => {
+let frame = 0;
+
+let previousPositions: THREE.Vector3[] = [];
+
+const getFPS = (): Promise<number> => new Promise(resolve =>
+  requestAnimationFrame(t1 =>
+    requestAnimationFrame(t2 => resolve(Math.round(1000 / (t2 - t1)))),
+  ),
+)
+
+let fps = 60;
+for (let i = 0; i < 10; i++) {
+  fps = await getFPS();
+  if (fps > 1 && fps < 1000) break;
+}
+console.debug(`FPS: ${fps}`);
+
+function animate() {
+  stats.begin();
+
+  const factor = 1;
+  world.timestep = 1.0 / fps * factor;
+  if (frame++ % factor === 0) world.step();
+
+  spinningCube.rotation.x += 0.05;
+  spinningCube.rotation.y += 0.05;
+
+  for (let i = 0; i < cubes.length; i++) {
+    const cube = cubes[i]!;
     cube.mesh.position.set(
       cube.body.translation().x,
       cube.body.translation().y,
@@ -193,9 +243,11 @@ function animate() {
       cube.body.rotation().z,
       cube.body.rotation().w,
     );
-  });
+  }
 
   renderer.render(scene, camera);
+
+  stats.end();
 
   requestAnimationFrame(animate);
 }

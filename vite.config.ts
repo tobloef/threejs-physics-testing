@@ -4,6 +4,7 @@ import topLevelAwait from "vite-plugin-top-level-await";
 
 export default defineConfig({
   root: './src/',
+  base: '/threejs-physics-testing/',
   build: {
     outDir: '../docs/'
   },

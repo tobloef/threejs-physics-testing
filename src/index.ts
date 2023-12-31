@@ -1,6 +1,8 @@
 import * as THREE from 'three';
-import * as CANNON from "cannon-es";
 import {green, grey} from "./textures/grids.ts";
+import type { RigidBody } from "@dimforge/rapier3d";
+
+const RAPIER = await import("@dimforge/rapier3d");
 
 const canvasElement = document.querySelector('canvas');
 
@@ -127,24 +129,15 @@ function setUvs2(mesh: THREE.Mesh, scale: number = 1) {
 
 setUvs2(floor);
 
-const world = new CANNON.World({
-  gravity: new CANNON.Vec3(0, -9.82, 0),
-  allowSleep: true,
-});
+const gravity = { x: 0.0, y: -9.81, z: 0.0 };
+const world = new RAPIER.World(gravity);
 
-const floorBody = new CANNON.Body({
-  type: CANNON.Body.STATIC,
-  shape: new CANNON.Plane(),
-  quaternion: new CANNON.Quaternion().setFromEuler(
-    degToRad(-90),
-    0,
-    0,
-  ),
-});
-world.addBody(floorBody);
+world.createCollider(
+  RAPIER.ColliderDesc.cuboid(100, 0.1, 100)
+);
 
 type Cube = {
-  body: CANNON.Body,
+  body: RigidBody,
   mesh: THREE.Mesh,
 };
 
@@ -159,17 +152,14 @@ for (let x = 0; x < xSize; x++) {
     for (let z = 0; z < zSize; z++) {
       const scale = 0.5;
 
-      const cubeBody = new CANNON.Body({
-        mass: 1,
-        shape: new CANNON.Box(new CANNON.Vec3(scale / 2, scale / 2, scale / 2)),
-        sleepSpeedLimit: 0.3,
-      });
-      cubeBody.position.set(
+      let rigidBodyDesc = RAPIER.RigidBodyDesc.dynamic().setTranslation(
         x * scale - xSize/2 * scale,
         y * scale + 5,
         z * scale - zSize/2 * scale,
       );
-      world.addBody(cubeBody);
+      let rigidBody = world.createRigidBody(rigidBodyDesc);
+      let colliderDesc = RAPIER.ColliderDesc.cuboid(scale / 2, scale / 2, scale / 2);
+      world.createCollider(colliderDesc, rigidBody);
 
       const cubeMesh = new THREE.Mesh(
         new THREE.BoxGeometry(scale, scale, scale),
@@ -181,7 +171,7 @@ for (let x = 0; x < xSize; x++) {
       scene.add(cubeMesh);
 
       cubes.push({
-        body: cubeBody,
+        body: rigidBody,
         mesh: cubeMesh,
       });
     }
@@ -189,19 +179,19 @@ for (let x = 0; x < xSize; x++) {
 }
 
 function animate() {
-  world.fixedStep();
+  world.step();
 
   cubes.forEach((cube) => {
     cube.mesh.position.set(
-      cube.body.position.x,
-      cube.body.position.y,
-      cube.body.position.z,
+      cube.body.translation().x,
+      cube.body.translation().y,
+      cube.body.translation().z,
     );
     cube.mesh.quaternion.set(
-      cube.body.quaternion.x,
-      cube.body.quaternion.y,
-      cube.body.quaternion.z,
-      cube.body.quaternion.w,
+      cube.body.rotation().x,
+      cube.body.rotation().y,
+      cube.body.rotation().z,
+      cube.body.rotation().w,
     );
   });
 

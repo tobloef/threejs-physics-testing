@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import * as CANNON from "cannon-es";
 import {green, grey} from "./textures/grids.ts";
 
 const canvasElement = document.querySelector('canvas');
@@ -68,24 +69,6 @@ const gridGreenMat = new THREE.MeshStandardMaterial({
   map: gridGreenTexture,
 });
 
-const cube1 = new THREE.Mesh(
-  new THREE.BoxGeometry(1, 1, 1),
-  gridGreenMat
-);
-cube1.position.y = 2;
-cube1.position.x = 2;
-cube1.castShadow = true;
-scene.add(cube1);
-
-const cube2 = new THREE.Mesh(
-  new THREE.BoxGeometry(2, 2, 2),
-  gridGreenMat
-);
-cube2.position.y = 2;
-cube2.position.x = -2;
-cube2.castShadow = true;
-scene.add(cube2);
-
 const whiteMat = new THREE.MeshStandardMaterial({
   color: "white",
 });
@@ -142,19 +125,88 @@ function setUvs2(mesh: THREE.Mesh, scale: number = 1) {
   }
 }
 
-setUvs2(cube1);
-setUvs2(cube2);
 setUvs2(floor);
 
+const world = new CANNON.World({
+  gravity: new CANNON.Vec3(0, -9.82, 0),
+  allowSleep: true,
+});
+
+const floorBody = new CANNON.Body({
+  type: CANNON.Body.STATIC,
+  shape: new CANNON.Plane(),
+  quaternion: new CANNON.Quaternion().setFromEuler(
+    degToRad(-90),
+    0,
+    0,
+  ),
+});
+world.addBody(floorBody);
+
+type Cube = {
+  body: CANNON.Body,
+  mesh: THREE.Mesh,
+};
+
+let cubes: Cube[] = [];
+
+let xSize = 6;
+let ySize = 6;
+let zSize = 6
+
+for (let x = 0; x < xSize; x++) {
+  for (let y = 0; y < ySize; y++) {
+    for (let z = 0; z < zSize; z++) {
+      const scale = 0.5;
+
+      const cubeBody = new CANNON.Body({
+        mass: 1,
+        shape: new CANNON.Box(new CANNON.Vec3(scale / 2, scale / 2, scale / 2)),
+        sleepSpeedLimit: 0.3,
+      });
+      cubeBody.position.set(
+        x * scale - xSize/2 * scale,
+        y * scale + 5,
+        z * scale - zSize/2 * scale,
+      );
+      world.addBody(cubeBody);
+
+      const cubeMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(scale, scale, scale),
+        gridGreenMat,
+      );
+      cubeMesh.castShadow = true;
+      cubeMesh.receiveShadow = true;
+      setUvs2(cubeMesh)
+      scene.add(cubeMesh);
+
+      cubes.push({
+        body: cubeBody,
+        mesh: cubeMesh,
+      });
+    }
+  }
+}
+
 function animate() {
-  [
-    cube1,
-    cube2,
-  ].forEach((mesh) => {
-    mesh.rotation.x += 0.01;
-    mesh.rotation.y += 0.01;
+  world.fixedStep();
+
+  cubes.forEach((cube) => {
+    cube.mesh.position.set(
+      cube.body.position.x,
+      cube.body.position.y,
+      cube.body.position.z,
+    );
+    cube.mesh.quaternion.set(
+      cube.body.quaternion.x,
+      cube.body.quaternion.y,
+      cube.body.quaternion.z,
+      cube.body.quaternion.w,
+    );
   });
+
   renderer.render(scene, camera);
+
   requestAnimationFrame(animate);
 }
 

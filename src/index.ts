@@ -306,19 +306,22 @@ class Stats {
     window.__STAT_COUNTERS++;
   }
 
-  draw() {
-    const start = performance.now();
+  data: number[] = [];
 
+  draw() {
     const stepWidth = 2 * PIXEL_RATIO;
     const lineHeight = 2 * PIXEL_RATIO;
 
-    const prevImage = this.offscreenGraphContext.canvas.transferToImageBitmap();
+    const y = Math.round(Math.random() * 20) + 60;
+    this.data.unshift(y);
+
+    if (this.data.length > this.width / stepWidth) {
+      this.data.pop();
+    }
+
+    const start = performance.now();
 
     this.offscreenGraphContext.clearRect(0, 0, this.width, this.height);
-    this.offscreenGraphContext.drawImage(prevImage, -stepWidth, 0);
-    prevImage.close();
-
-    const y = Math.round(Math.random() * 20) + 60;
 
     const gradient = this.offscreenGraphContext.createLinearGradient(
       0,
@@ -329,22 +332,25 @@ class Stats {
     gradient.addColorStop(0, "rgba(255, 0, 0, 0.5)");
     gradient.addColorStop(1, "rgba(255, 0, 0, 0)");
 
-    this.offscreenGraphContext.fillStyle = gradient;
+    for (let i = 0; i < this.data.length; i++) {
+      let thisY = this.data[i] ?? 0;
 
-    this.offscreenGraphContext.fillRect(
-      this.width - stepWidth,
-      y,
-      stepWidth,
-      this.height - y,
-    );
+      this.offscreenGraphContext.fillStyle = gradient;
+      this.offscreenGraphContext.fillRect(
+        this.width - stepWidth * (i + 1),
+        thisY,
+        stepWidth,
+        this.height - thisY,
+      );
 
-    this.offscreenGraphContext.fillStyle = "red";
-    this.offscreenGraphContext.fillRect(
-      this.width - stepWidth,
-      y,
-      stepWidth,
-      lineHeight,
-    );
+      this.offscreenGraphContext.fillStyle = "red";
+      this.offscreenGraphContext.fillRect(
+        this.width - stepWidth * (i + 1),
+        thisY,
+        stepWidth,
+        lineHeight,
+      );
+    }
 
     this.context.clearRect(0, 0, this.width, this.height);
     this.context.drawImage(this.offscreenGraphContext.canvas, 0, 0);

@@ -4,7 +4,6 @@ import {
   grey,
   red,
 } from "./textures/grids.ts";
-import Stats from "stats.js";
 import type { RigidBody } from "@dimforge/rapier3d";
 
 const RAPIER = await import("@dimforge/rapier3d");
@@ -199,10 +198,6 @@ for (let x = 0; x < xSize; x++) {
   }
 }
 
-const stats = new Stats();
-stats.showPanel(0);
-document.body.appendChild(stats.dom);
-
 let frame = 0;
 
 let previousPositions: THREE.Vector3[] = [];
@@ -216,8 +211,6 @@ const getFPS = (): Promise<number> => new Promise(resolve =>
 const pps = 60;
 
 function animate() {
-  stats.begin();
-
   const factor = 1;
   world.timestep = 1.0 / pps * factor;
   if (frame++ % factor === 0) world.step();
@@ -242,17 +235,176 @@ function animate() {
 
   renderer.render(scene, camera);
 
-  if (frame === pps * 5) {
-    const snapshop = world.takeSnapshot();
-    alert(snapshop.reduce((acc, val) => acc + val, 0));
-  }
-
-  stats.end();
-
   requestAnimationFrame(animate);
 }
 
-animate();
+const MAX_DELTA_TIME = 1;
+const FIXED_DELTA_TIME = 1 / 20;
+let previousTime = 0;
+let timeAccumulator = 0;
+
+declare global {
+  interface Window {
+    __STAT_COUNTERS: number;
+  }
+}
+
+const PIXEL_RATIO = window.devicePixelRatio ?? 1;
+
+let a = 0;
+let f = 0;
+let t = 60 * 5;
+
+class Stats {
+  private context: CanvasRenderingContext2D;
+  private width: number;
+  private height: number;
+  private offscreenGraphContext: OffscreenCanvasRenderingContext2D;
+
+  constructor() {
+    if (window.__STAT_COUNTERS === undefined) {
+      window.__STAT_COUNTERS = 0;
+    }
+
+    this.width = 500 * PIXEL_RATIO;
+    this.height = 300 * PIXEL_RATIO;
+
+    const container = document.createElement("div");
+    container.style.position = "fixed";
+    container.style.top = "0";
+    container.style.left = "0";
+    container.style.zIndex = "10000";
+    document.body.appendChild(container);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = this.width;
+    canvas.height = this.height;
+    canvas.style.width = `${this.width / PIXEL_RATIO}px`;
+    canvas.style.height = `${this.height / PIXEL_RATIO}px`;
+    container.appendChild(canvas);
+
+    const context = canvas.getContext("2d");
+
+    if (context === null) {
+      throw new Error("Failed to set up stats panel, canvas context could not be created.");
+    }
+
+    this.context = context;
+
+    this.context.font = `bold ${8 * PIXEL_RATIO}px monospace`;
+
+    const offscreenGraphCanvas = new OffscreenCanvas(this.width, this.height);
+    const offscreenGraphContext = offscreenGraphCanvas.getContext("2d");
+
+    if (offscreenGraphContext === null) {
+      throw new Error("Failed to set up stats panel, offscreen canvas context could not be created.");
+    }
+
+    this.offscreenGraphContext = offscreenGraphContext;
+    this.offscreenGraphContext.imageSmoothingEnabled = false;
+
+    window.__STAT_COUNTERS++;
+  }
+
+  draw() {
+    const start = performance.now();
+
+    const stepWidth = 2 * PIXEL_RATIO;
+    const lineHeight = 2 * PIXEL_RATIO;
+
+    const prevImage = this.offscreenGraphContext.canvas.transferToImageBitmap();
+
+    this.offscreenGraphContext.clearRect(0, 0, this.width, this.height);
+    this.offscreenGraphContext.drawImage(prevImage, -stepWidth, 0);
+    prevImage.close();
+
+    const y = Math.round(Math.random() * 20) + 60;
+
+    const gradient = this.offscreenGraphContext.createLinearGradient(
+      0,
+      0,
+      stepWidth,
+      this.height,
+    );
+    gradient.addColorStop(0, "rgba(255, 0, 0, 0.5)");
+    gradient.addColorStop(1, "rgba(255, 0, 0, 0)");
+
+    this.offscreenGraphContext.fillStyle = gradient;
+
+    this.offscreenGraphContext.fillRect(
+      this.width - stepWidth,
+      y,
+      stepWidth,
+      this.height - y,
+    );
+
+    this.offscreenGraphContext.fillStyle = "red";
+    this.offscreenGraphContext.fillRect(
+      this.width - stepWidth,
+      y,
+      stepWidth,
+      lineHeight,
+    );
+
+    this.context.clearRect(0, 0, this.width, this.height);
+    this.context.drawImage(this.offscreenGraphContext.canvas, 0, 0);
+
+    const end = performance.now();
+    const delta = end - start;
+
+    if (f < t) {
+      a += delta;
+      f++;
+    }
+
+    if (f === t) {
+      console.debug(a / t);
+      f++;
+    }
+  }
+}
+
+function setupStats() {
+
+}
+
+const stats = new Stats();
+
+const onAnimationFrame = () => {
+  stats.draw();
+
+  const now = performance.now() / 1000;
+
+  let deltaTime = now - previousTime;
+  previousTime = now;
+
+  if (deltaTime > MAX_DELTA_TIME) {
+    deltaTime = MAX_DELTA_TIME;
+  }
+
+  timeAccumulator += deltaTime;
+
+  while (timeAccumulator >= FIXED_DELTA_TIME) {
+    fixedUpdate(FIXED_DELTA_TIME);
+    timeAccumulator -= FIXED_DELTA_TIME;
+  }
+
+  const frameProgress = timeAccumulator / FIXED_DELTA_TIME;
+
+  update(deltaTime, frameProgress);
+
+  requestAnimationFrame(onAnimationFrame);
+}
+
+onAnimationFrame();
+
+function fixedUpdate(fixedDeltaTime: number) {
+  world.step();
+}
+
+function update(deltaTime: number, frameProgress: number) {
+  renderer.render(scene, camera);
+}
 
 type Dispose = () => void;
 

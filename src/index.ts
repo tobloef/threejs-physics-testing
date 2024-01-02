@@ -523,21 +523,23 @@ const stats = {
 }
 
 const updateGraph = new Graph({
-  min: -10,
-  max: 20,
+  min: -5,
+  max: 10,
+  height: 50,
   color: "red",
   position: {
-    top: 0,
+    top: 10,
     left: 0,
   },
 });
 const fixedUpdateGraph = new Graph({
-  min: -10,
-  max: 20,
+  min: -5,
+  max: 10,
+  height: 50,
   color: "green",
   position: {
-    top: 0,
-    right: 0,
+    top: 70,
+    left: 0,
   },
 });
 

@@ -4,10 +4,23 @@ import {
   grey,
   red,
 } from "./textures/grids.ts";
-import type { RigidBody } from "@dimforge/rapier3d";
+import type {
+  RigidBody,
+  Rotation,
+  Vector,
+} from "@dimforge/rapier3d";
 import chroma from "chroma-js";
+import {
+  Quaternion,
+  Vector3,
+} from "three";
 
 const RAPIER = await import("@dimforge/rapier3d");
+
+const MAX_DELTA_TIME = 1 / 10;
+const FIXED_DELTA_TIME = 1 / 30;
+let prevCubeInfo: Array<[Vector3, Quaternion]>;
+const interpolatePhysics = true;
 
 const canvasElement = document.querySelector("canvas");
 
@@ -101,15 +114,12 @@ const floor = new THREE.Mesh(
   whiteMat,
 );
 floor.rotation.x = degToRad(-90);
-floor.receiveShadow = true;
 scene.add(floor);
 
 const spinningCube = new THREE.Mesh(
   new THREE.BoxGeometry(0.1, 0.1, 0.1),
   gridRedMat,
 );
-spinningCube.castShadow = true;
-spinningCube.receiveShadow = true;
 spinningCube.position.set(0, 4.5, 4.5);
 scene.add(spinningCube);
 
@@ -153,6 +163,7 @@ setUvs2(floor);
 const gravity = {x: 0.0, y: -9.81, z: 0.0};
 const world = new RAPIER.World(gravity);
 
+
 world.createCollider(
   RAPIER.ColliderDesc.cuboid(100, 0.1, 100),
 );
@@ -186,8 +197,6 @@ for (let x = 0; x < xSize; x++) {
         new THREE.BoxGeometry(scale, scale, scale),
         gridGreenMat,
       );
-      cubeMesh.castShadow = true;
-      cubeMesh.receiveShadow = true;
       setUvs2(cubeMesh)
       scene.add(cubeMesh);
 
@@ -199,48 +208,7 @@ for (let x = 0; x < xSize; x++) {
   }
 }
 
-let frame = 0;
-
-let previousPositions: THREE.Vector3[] = [];
-
-const getFPS = (): Promise<number> => new Promise(resolve =>
-  requestAnimationFrame(t1 =>
-    requestAnimationFrame(t2 => resolve(Math.round(1000 / (t2 - t1)))),
-  ),
-)
-
-const pps = 60;
-
-function animate() {
-  const factor = 1;
-  world.timestep = 1.0 / pps * factor;
-  if (frame++ % factor === 0) world.step();
-
-  spinningCube.rotation.x += 0.05;
-  spinningCube.rotation.y += 0.05;
-
-  for (let i = 0; i < cubes.length; i++) {
-    const cube = cubes[i]!;
-    cube.mesh.position.set(
-      cube.body.translation().x,
-      cube.body.translation().y,
-      cube.body.translation().z,
-    );
-    cube.mesh.quaternion.set(
-      cube.body.rotation().x,
-      cube.body.rotation().y,
-      cube.body.rotation().z,
-      cube.body.rotation().w,
-    );
-  }
-
-  renderer.render(scene, camera);
-
-  requestAnimationFrame(animate);
-}
-
-const MAX_DELTA_TIME = 1;
-const FIXED_DELTA_TIME = 1 / 20;
+world.timestep = FIXED_DELTA_TIME;
 let previousTime = 0;
 let timeAccumulator = 0;
 
@@ -267,29 +235,42 @@ function removeUndef<T>(obj: T): RemoveUndefined<T> {
 }
 
 type StatsOptions = {
-  graphColor: string;
+  color: string;
   lineThickness: number;
   background: boolean;
   backgroundColor?: string;
   graphStyle: "line" | "filled" | "gradient",
   width: number;
   height: number;
-  bufferSize: number;
+  bufferLengthSeconds: number;
+  autoAddToDom: boolean;
+  autoRender: boolean;
+  min?: number;
+  max?: number;
+  position: (
+    | { top: number; left: number; }
+    | { top: number; right: number; }
+    | { bottom: number; left: number; }
+    | { bottom: number; right: number; }
+  )
 }
 
 const DEFAULT_STATS_OPTIONS: StatsOptions = {
-  graphColor: "green",
+  color: "green",
   graphStyle: "gradient",
   lineThickness: 2,
   background: false,
   width: 300,
   height: 100,
-  bufferSize: 250,
+  bufferLengthSeconds: 5,
+  autoAddToDom: true,
+  autoRender: true,
+  position: { top: 0, left: 0 }
 }
 
 class Graph {
   public options: StatsOptions;
-  public data: number[] = [];
+  public data: Array<[number, number]> = [];
 
   private context: CanvasRenderingContext2D;
   private offscreenGraphContext: OffscreenCanvasRenderingContext2D;
@@ -297,49 +278,69 @@ class Graph {
   private readonly deviceHeight: number;
   private readonly gradient: CanvasGradient;
 
-  constructor(options?: DeepPartial<StatsOptions>) {
+  constructor(options?: Partial<StatsOptions>) {
     this.options = {
       ...DEFAULT_STATS_OPTIONS,
       ...removeUndef(options),
     };
 
     if (this.options?.background && this.options.backgroundColor === undefined) {
-      const chromeGraphColor = chroma(this.options.graphColor);
+      const chromeGraphColor = chroma(this.options.color);
       this.options.backgroundColor = chromeGraphColor.darken(1.5).css();
     }
 
     this.deviceWidth = this.options.width * PIXEL_RATIO;
     this.deviceHeight = this.options.height * PIXEL_RATIO;
 
-    const container = this.createContainerElement();
-    const canvas = this.createCanvasElement(container);
+    const canvas = this.createCanvasElement();
+    if (this.options.autoAddToDom) {
+      document.body.appendChild(canvas);
+    }
+
     this.context = this.createCanvasContext(canvas);
     this.offscreenGraphContext = this.createOffscreenCanvasContext();
     this.gradient = this.createGradient();
+
+    if (this.options.autoRender) {
+      this.onAnimationFrame();
+    }
   }
 
-  private createContainerElement(): HTMLElement {
-    const container = document.createElement("div");
+  public update(x: number, y: number) {
+    while (this.data.length > 1 && this.data[1]![0] < x - this.options.bufferLengthSeconds * 1000) {
+      this.data.shift();
+    }
 
-    container.style.position = "fixed";
-    container.style.top = "0";
-    container.style.left = "0";
-    container.style.zIndex = "10000";
-
-    document.body.appendChild(container);
-
-    return container;
+    this.data.push([x, y]);
   }
 
-  private createCanvasElement(container: HTMLElement = document.body): HTMLCanvasElement {
+  private onAnimationFrame() {
+    this.draw();
+    requestAnimationFrame(this.onAnimationFrame.bind(this));
+  }
+
+  private createCanvasElement(): HTMLCanvasElement {
     const canvas = document.createElement("canvas");
 
     canvas.width = this.deviceWidth;
     canvas.height = this.deviceHeight;
     canvas.style.width = `${this.deviceWidth / PIXEL_RATIO}px`;
     canvas.style.height = `${this.deviceHeight / PIXEL_RATIO}px`;
+    canvas.style.position = "fixed";
+    canvas.style.zIndex = "10000";
 
-    container.appendChild(canvas);
+    if ("top" in this.options.position) {
+      canvas.style.top = `${this.options.position.top}px`;
+    }
+    if ("bottom" in this.options.position) {
+      canvas.style.bottom = `${this.options.position.bottom}px`;
+    }
+    if ("left" in this.options.position) {
+      canvas.style.left = `${this.options.position.left}px`;
+    }
+    if ("right" in this.options.position) {
+      canvas.style.right = `${this.options.position.right}px`;
+    }
 
     return canvas;
   }
@@ -378,7 +379,7 @@ class Graph {
       this.deviceHeight,
     );
 
-    const chromeGraphColor = chroma(this.options.graphColor);
+    const chromeGraphColor = chroma(this.options.color);
 
     gradient.addColorStop(0, chromeGraphColor.alpha(0.5).css());
     gradient.addColorStop(1, chromeGraphColor.alpha(0).css());
@@ -386,118 +387,92 @@ class Graph {
     return gradient;
   }
 
-  private testing() {
-    if (window.frame === undefined) {
-      window.frame = 0;
-      window.height = 0;
-    }
-    window.frame = window.frame + 1;
-    const metaHeight = this.deviceHeight * 2;
-    window.height = Math.sin(window.frame / 200) * (metaHeight / 2) + (metaHeight / 2)
-    const y = Math.sin(window.frame / 40) * (window.height / 2) + (window.height / 2);
-    this.data.push(y);
-
-    if (this.data.length > this.options.bufferSize) {
-      this.data.shift();
-    }
-  }
-
   draw() {
-    this.testing();
-
     this.offscreenGraphContext.clearRect(0, 0, this.deviceWidth, this.deviceHeight);
 
     this.offscreenGraphContext.beginPath();
-    this.offscreenGraphContext.strokeStyle = this.options.graphColor;
+    this.offscreenGraphContext.strokeStyle = this.options.color;
     this.offscreenGraphContext.lineWidth = this.options.lineThickness * PIXEL_RATIO;
 
-    let max;
-    let min;
+    const yValues = this.data.map(([, y]) => y);
 
-    const autoScaleY = false;
+    let minY = this.options.min;
+    if (yValues.length > 0) minY ??= Math.min(...yValues);
+    minY ??= 0;
 
-    if (autoScaleY) {
-      for (let i = 0; i < this.data.length; i++) {
-        if (max === undefined || this.data[i]! > max) {
-          max = this.data[i];
-        }
+    let maxY = this.options.max;
+    if (yValues.length > 0) maxY ??= Math.max(...yValues);
+    maxY ??= 1;
 
-        if (min === undefined || this.data[i]! < min) {
-          min = this.data[i];
-        }
-      }
-    } else {
-      max = 800;
-      min = 0;
-    }
+    const range = maxY - minY;
 
-    max = max ?? 1;
-    min = min ?? 0;
+    const paddingX = 0;
+    const paddingY = 10;
+    const width = this.deviceWidth - (paddingX * 2);
+    const height = this.deviceHeight - (paddingY * 2);
 
-    const pad = 0;
-    max *= 1 + pad;
-    min *= 1 - pad;
-
-    const range = max - min;
-    const scaling = (this.deviceHeight - this.offscreenGraphContext.lineWidth * 2) / range;
-
-    const segmentWidth = (this.deviceWidth / this.options.bufferSize);
+    const scaling = (height - this.offscreenGraphContext.lineWidth * 2) / range;
 
     let lastX = 0;
     let lastY = 0;
 
-    for (let i = this.data.length - 1; i >= 0; i--) {
-      const x = this.deviceWidth - (segmentWidth * ((this.data.length - i)));
-      const y = this.deviceHeight - ((this.data[i] ?? 0) - min) * scaling - this.offscreenGraphContext.lineWidth;
+    if (this.data.length > 0) {
+      const now = performance.now();
+      for (let i = this.data.length - 1; i >= 0; i--) {
+        const [xData, yData] = this.data[i]!;
 
-      if (i === this.data.length - 1) {
-        this.offscreenGraphContext.moveTo(
-          this.deviceWidth,
+        const x = (1 - (((now - xData) / 1000) / this.options.bufferLengthSeconds)) * width;
+        const y = -paddingY + this.deviceHeight - ((yData ?? 0) - minY) * scaling - this.offscreenGraphContext.lineWidth;
+
+        if (i === this.data.length - 1) {
+          this.offscreenGraphContext.moveTo(
+            width,
+            y,
+          );
+        }
+
+        this.offscreenGraphContext.lineTo(
+          x,
           y,
+        );
+
+        lastX = x;
+        lastY = y;
+      }
+
+      if (this.options.graphStyle !== "line") {
+        this.offscreenGraphContext.lineTo(
+          lastX - this.offscreenGraphContext.lineWidth,
+          lastY,
+        );
+        this.offscreenGraphContext.lineTo(
+          lastX - this.offscreenGraphContext.lineWidth,
+          this.deviceHeight + this.offscreenGraphContext.lineWidth,
+        );
+        this.offscreenGraphContext.lineTo(
+          this.deviceWidth + this.offscreenGraphContext.lineWidth,
+          this.deviceHeight + this.offscreenGraphContext.lineWidth,
+        );
+        this.offscreenGraphContext.lineTo(
+          this.deviceWidth + this.offscreenGraphContext.lineWidth,
+          lastY,
         );
       }
 
-      this.offscreenGraphContext.lineTo(
-        x,
-        y,
-      );
+      this.offscreenGraphContext.fillStyle = this.options.graphStyle === "gradient"
+        ? this.gradient
+        : this.options.color;
 
-      lastX = x;
-      lastY = y;
-    }
-
-    if (this.options.graphStyle !== "line") {
-      this.offscreenGraphContext.lineTo(
-        lastX - this.offscreenGraphContext.lineWidth,
-        lastY,
-      );
-      this.offscreenGraphContext.lineTo(
-        lastX - this.offscreenGraphContext.lineWidth,
-        this.deviceHeight + this.offscreenGraphContext.lineWidth,
-      );
-      this.offscreenGraphContext.lineTo(
-        this.deviceWidth + this.offscreenGraphContext.lineWidth,
-        this.deviceHeight + this.offscreenGraphContext.lineWidth,
-      );
-      this.offscreenGraphContext.lineTo(
-        this.deviceWidth + this.offscreenGraphContext.lineWidth,
-        lastY,
-      );
-    }
-
-    this.offscreenGraphContext.fillStyle = this.options.graphStyle === "gradient"
-      ? this.gradient
-      : this.options.graphColor;
-
-    this.offscreenGraphContext.stroke();
-    if (this.options.graphStyle !== "line") {
-      this.offscreenGraphContext.fill()
-      this.offscreenGraphContext.clearRect(
-        lastX - this.offscreenGraphContext.lineWidth * 2,
-        0,
-        this.offscreenGraphContext.lineWidth * 2,
-        this.deviceHeight,
-      );
+      this.offscreenGraphContext.stroke();
+      if (this.options.graphStyle !== "line") {
+        this.offscreenGraphContext.fill()
+        this.offscreenGraphContext.clearRect(
+          lastX - this.offscreenGraphContext.lineWidth * 2,
+          0,
+          this.offscreenGraphContext.lineWidth * 2,
+          this.deviceHeight,
+        );
+      }
     }
 
     this.context.clearRect(0, 0, this.deviceWidth, this.deviceHeight);
@@ -511,15 +486,62 @@ class Graph {
   }
 }
 
-function setupStats() {
+let updateBeginTime: number;
+let fixedUpdateBeginTime: number;
 
+const stats = {
+  fps: {
+    measure: () => {
+
+    },
+  },
+  update: {
+    begin: () => {
+      updateBeginTime = performance.now();
+    },
+    end: () => {
+      const updateEndTime = performance.now();
+      const deltaTime = updateEndTime - updateBeginTime;
+      updateGraph.update(updateBeginTime, deltaTime);
+      updateGraph.update(updateEndTime, deltaTime);
+    },
+  },
+  fixedUpdate: {
+    begin: () => {
+      fixedUpdateBeginTime = performance.now();
+    },
+    end: () => {
+      const fixedUpdateEndTime = performance.now();
+      const deltaTime = fixedUpdateEndTime - fixedUpdateBeginTime;
+      fixedUpdateGraph.update(fixedUpdateBeginTime, deltaTime);
+      fixedUpdateGraph.update(fixedUpdateEndTime, deltaTime);
+    },
+  },
+  memory: {
+    measure: () => {},
+  },
 }
 
-const stats = new Graph();
+const updateGraph = new Graph({
+  min: -10,
+  max: 20,
+  color: "red",
+  position: {
+    top: 0,
+    left: 0,
+  },
+});
+const fixedUpdateGraph = new Graph({
+  min: -10,
+  max: 20,
+  color: "green",
+  position: {
+    top: 0,
+    right: 0,
+  },
+});
 
 const onAnimationFrame = () => {
-  stats.draw();
-
   const now = performance.now() / 1000;
 
   let deltaTime = now - previousTime;
@@ -532,24 +554,79 @@ const onAnimationFrame = () => {
   timeAccumulator += deltaTime;
 
   while (timeAccumulator >= FIXED_DELTA_TIME) {
+    stats.fixedUpdate.begin();
     fixedUpdate(FIXED_DELTA_TIME);
+    stats.fixedUpdate.end();
     timeAccumulator -= FIXED_DELTA_TIME;
   }
 
   const frameProgress = timeAccumulator / FIXED_DELTA_TIME;
 
+  stats.update.begin();
   update(deltaTime, frameProgress);
+  stats.update.end();
 
   requestAnimationFrame(onAnimationFrame);
 }
 
+let f = 0;
+
 onAnimationFrame();
 
 function fixedUpdate(fixedDeltaTime: number) {
+  for (let i = 0; i < cubes.length; i++) {
+    const cube = cubes[i]!;
+
+    const rapierPos = cube.body.translation();
+    const rapierRot = cube.body.rotation();
+    const threePos = new Vector3(rapierPos.x, rapierPos.y, rapierPos.z);
+    const threeRot = new Quaternion(rapierRot.x, rapierRot.y, rapierRot.z, rapierRot.w);
+
+    if (prevCubeInfo === undefined) {
+      prevCubeInfo = [];
+    }
+
+    prevCubeInfo[i] = [
+      threePos,
+      threeRot,
+    ]
+
+    cube.body.applyImpulse({
+      x: Math.sin(f * 2 + 2) * fixedDeltaTime,
+      y: Math.sin(f * 7) * 3 * fixedDeltaTime,
+      z: 0,
+    }, true);
+  }
+
   world.step();
 }
 
 function update(deltaTime: number, frameProgress: number) {
+  f += deltaTime;
+
+  if (prevCubeInfo !== undefined) {
+    for (let i = 0; i < cubes.length; i++) {
+      const cube = cubes[i]!;
+      const [prevPos, prevRot] = prevCubeInfo[i]!;
+
+      const rapierPos = cube.body.translation();
+      const rapierRot = cube.body.rotation();
+      const threePos = new Vector3(rapierPos.x, rapierPos.y, rapierPos.z);
+      const threeRot = new Quaternion(rapierRot.x, rapierRot.y, rapierRot.z, rapierRot.w);
+
+      if (interpolatePhysics) {
+        cube.mesh.position.lerpVectors(prevPos, threePos, frameProgress);
+        cube.mesh.quaternion.slerpQuaternions(prevRot, threeRot, frameProgress)
+      } else {
+        cube.mesh.position.copy(threePos);
+        cube.mesh.quaternion.copy(threeRot);
+      }
+    }
+  }
+
+  spinningCube.rotation.y += deltaTime * 2;
+  spinningCube.rotation.x += deltaTime * 2;
+
   renderer.render(scene, camera);
 }
 

@@ -5,6 +5,7 @@ import {
   red,
 } from "./textures/grids.ts";
 import type { RigidBody } from "@dimforge/rapier3d";
+import chroma from "chroma-js";
 
 const RAPIER = await import("@dimforge/rapier3d");
 
@@ -243,57 +244,120 @@ const FIXED_DELTA_TIME = 1 / 20;
 let previousTime = 0;
 let timeAccumulator = 0;
 
-declare global {
-  interface Window {
-    __STAT_COUNTERS: number;
-  }
-}
-
 const PIXEL_RATIO = window.devicePixelRatio ?? 1;
 
-let a = 0;
-let f = 0;
-let t = 60 * 5;
+type DeepPartial<T extends object> = {
+  [P in keyof T]?: T[P] extends object ? DeepPartial<T[P]> : T[P];
+};
 
-class Stats {
+type RemoveUndefined<T> = {
+  [K in keyof T as T[K] extends undefined ? never : K]: T[K];
+};
+
+function removeUndef<T>(obj: T): RemoveUndefined<T> {
+  const newObj: any = {};
+
+  for (const key in obj) {
+    if (obj[key] !== undefined) {
+      newObj[key] = obj[key];
+    }
+  }
+
+  return newObj;
+}
+
+type StatsOptions = {
+  graphColor: string;
+  lineThickness: number;
+  background: boolean;
+  backgroundColor?: string;
+  graphStyle: "line" | "filled" | "gradient",
+  width: number;
+  height: number;
+  bufferSize: number;
+}
+
+const DEFAULT_STATS_OPTIONS: StatsOptions = {
+  graphColor: "green",
+  graphStyle: "gradient",
+  lineThickness: 2,
+  background: false,
+  width: 500,
+  height: 300,
+  bufferSize: 250,
+}
+
+class Graph {
+  public options: StatsOptions;
+  public data: number[] = [];
+
   private context: CanvasRenderingContext2D;
-  private width: number;
-  private height: number;
   private offscreenGraphContext: OffscreenCanvasRenderingContext2D;
+  private readonly deviceWidth: number;
+  private readonly deviceHeight: number;
+  private readonly gradient: CanvasGradient;
 
-  constructor() {
-    if (window.__STAT_COUNTERS === undefined) {
-      window.__STAT_COUNTERS = 0;
+  constructor(options?: DeepPartial<StatsOptions>) {
+    this.options = {
+      ...DEFAULT_STATS_OPTIONS,
+      ...removeUndef(options),
+    };
+
+    if (this.options?.background && this.options.backgroundColor === undefined) {
+      const chromeGraphColor = chroma(this.options.graphColor);
+      this.options.backgroundColor = chromeGraphColor.darken(1.5).css();
     }
 
-    this.width = 500 * PIXEL_RATIO;
-    this.height = 300 * PIXEL_RATIO;
+    this.deviceWidth = this.options.width * PIXEL_RATIO;
+    this.deviceHeight = this.options.height * PIXEL_RATIO;
 
+    const container = this.createContainerElement();
+    const canvas = this.createCanvasElement(container);
+    this.context = this.createCanvasContext(canvas);
+    this.offscreenGraphContext = this.createOffscreenCanvasContext();
+    this.gradient = this.createGradient();
+  }
+
+  private createContainerElement(): HTMLElement {
     const container = document.createElement("div");
+
     container.style.position = "fixed";
     container.style.top = "0";
     container.style.left = "0";
     container.style.zIndex = "10000";
+
     document.body.appendChild(container);
 
+    return container;
+  }
+
+  private createCanvasElement(container: HTMLElement = document.body): HTMLCanvasElement {
     const canvas = document.createElement("canvas");
-    canvas.width = this.width;
-    canvas.height = this.height;
-    canvas.style.width = `${this.width / PIXEL_RATIO}px`;
-    canvas.style.height = `${this.height / PIXEL_RATIO}px`;
+
+    canvas.width = this.deviceWidth;
+    canvas.height = this.deviceHeight;
+    canvas.style.width = `${this.deviceWidth / PIXEL_RATIO}px`;
+    canvas.style.height = `${this.deviceHeight / PIXEL_RATIO}px`;
+
     container.appendChild(canvas);
 
+    return canvas;
+  }
+
+  private createCanvasContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
     const context = canvas.getContext("2d");
 
     if (context === null) {
-      throw new Error("Failed to set up stats panel, canvas context could not be created.");
+      throw new Error("Canvas context could not be created.");
     }
 
-    this.context = context;
+    context.font = `bold ${12 * PIXEL_RATIO}px monospace`;
 
-    this.context.font = `bold ${8 * PIXEL_RATIO}px monospace`;
+    return context;
+  }
 
-    const offscreenGraphCanvas = new OffscreenCanvas(this.width, this.height);
+  private createOffscreenCanvasContext(): OffscreenCanvasRenderingContext2D {
+    const offscreenGraphCanvas = new OffscreenCanvas(this.deviceWidth, this.deviceHeight);
     const offscreenGraphContext = offscreenGraphCanvas.getContext("2d");
 
     if (offscreenGraphContext === null) {
@@ -303,70 +367,127 @@ class Stats {
     this.offscreenGraphContext = offscreenGraphContext;
     this.offscreenGraphContext.imageSmoothingEnabled = false;
 
-    window.__STAT_COUNTERS++;
+    return offscreenGraphContext;
   }
 
-  data: number[] = [];
-
-  draw() {
-    const stepWidth = 2 * PIXEL_RATIO;
-    const lineHeight = 2 * PIXEL_RATIO;
-
-    const y = Math.round(Math.random() * 20) + 60;
-    this.data.unshift(y);
-
-    if (this.data.length > this.width / stepWidth) {
-      this.data.pop();
-    }
-
-    const start = performance.now();
-
-    this.offscreenGraphContext.clearRect(0, 0, this.width, this.height);
-
+  private createGradient(): CanvasGradient {
     const gradient = this.offscreenGraphContext.createLinearGradient(
       0,
       0,
-      stepWidth,
-      this.height,
+      0,
+      this.deviceHeight,
     );
-    gradient.addColorStop(0, "rgba(255, 0, 0, 0.5)");
-    gradient.addColorStop(1, "rgba(255, 0, 0, 0)");
 
-    for (let i = 0; i < this.data.length; i++) {
-      let thisY = this.data[i] ?? 0;
+    const chromeGraphColor = chroma(this.options.graphColor);
 
-      this.offscreenGraphContext.fillStyle = gradient;
-      this.offscreenGraphContext.fillRect(
-        this.width - stepWidth * (i + 1),
-        thisY,
-        stepWidth,
-        this.height - thisY,
+    gradient.addColorStop(0, chromeGraphColor.alpha(0.5).css());
+    gradient.addColorStop(1, chromeGraphColor.alpha(0).css());
+
+    return gradient;
+  }
+
+  private testing() {
+    if (window.frame === undefined) {
+      window.frame = 0;
+      window.height = 0;
+    }
+    window.frame = window.frame + 1;
+    const metaHeight = this.deviceHeight * 2;
+    window.height = Math.sin(window.frame / 200) * (metaHeight / 2) + (metaHeight / 2)
+    const y = Math.sin(window.frame / 40) * (window.height / 2) + (window.height / 2);
+    this.data.push(y);
+
+    if (this.data.length > this.options.bufferSize) {
+      this.data.shift();
+    }
+  }
+
+  draw() {
+    this.testing();
+
+    this.offscreenGraphContext.clearRect(0, 0, this.deviceWidth, this.deviceHeight);
+
+    this.offscreenGraphContext.beginPath();
+    this.offscreenGraphContext.strokeStyle = this.options.graphColor;
+    this.offscreenGraphContext.lineWidth = this.options.lineThickness * PIXEL_RATIO;
+
+    const segmentWidth = (this.deviceWidth / this.options.bufferSize);
+
+    let lastX = 0;
+    let lastY = 0;
+
+    for (let i = this.data.length - 1; i >= 0; i--) {
+      const x = this.deviceWidth - (segmentWidth * ((this.data.length - i)));
+      const y = this.deviceHeight - (this.data[i] ?? 0) - this.offscreenGraphContext.lineWidth / 2
+
+      if (i === this.data.length - 1) {
+        this.offscreenGraphContext.moveTo(
+          this.deviceWidth,
+          y,
+        );
+      }
+
+      /*if (this.options.graphStyle !== "line") {
+        this.offscreenGraphContext.fillStyle = this.options.graphStyle === "gradient" ? this.gradient : this.options.graphColor;
+        this.offscreenGraphContext.fillRect(
+          x,
+          y,
+          segmentWidth,
+          this.deviceHeight - y,
+        );
+      }*/
+
+      this.offscreenGraphContext.lineTo(
+        x,
+        y,
       );
 
-      this.offscreenGraphContext.fillStyle = "red";
-      this.offscreenGraphContext.fillRect(
-        this.width - stepWidth * (i + 1),
-        thisY,
-        stepWidth,
-        lineHeight,
+      lastX = x;
+      lastY = y;
+    }
+
+    if (this.options.graphStyle !== "line") {
+      this.offscreenGraphContext.lineTo(
+        lastX - this.offscreenGraphContext.lineWidth,
+        lastY,
+      );
+      this.offscreenGraphContext.lineTo(
+        lastX - this.offscreenGraphContext.lineWidth,
+        this.deviceHeight + this.offscreenGraphContext.lineWidth,
+      );
+      this.offscreenGraphContext.lineTo(
+        this.deviceWidth + this.offscreenGraphContext.lineWidth,
+        this.deviceHeight + this.offscreenGraphContext.lineWidth,
+      );
+      this.offscreenGraphContext.lineTo(
+        this.deviceWidth + this.offscreenGraphContext.lineWidth,
+        lastY,
       );
     }
 
-    this.context.clearRect(0, 0, this.width, this.height);
+    this.offscreenGraphContext.fillStyle = this.options.graphStyle === "gradient"
+      ? this.gradient
+      : this.options.graphColor;
+
+    this.offscreenGraphContext.stroke();
+    if (this.options.graphStyle !== "line") {
+      this.offscreenGraphContext.fill()
+      this.offscreenGraphContext.clearRect(
+        lastX - this.offscreenGraphContext.lineWidth * 2,
+        0,
+        this.offscreenGraphContext.lineWidth * 2,
+        this.deviceHeight,
+      );
+    }
+
+    this.context.clearRect(0, 0, this.deviceWidth, this.deviceHeight);
+
+    if (this.options.background && this.options.backgroundColor) {
+      this.context.fillStyle = this.options.backgroundColor;
+      this.context.fillRect(0, 0, this.deviceWidth, this.deviceHeight);
+    }
+
     this.context.drawImage(this.offscreenGraphContext.canvas, 0, 0);
-
-    const end = performance.now();
-    const delta = end - start;
-
-    if (f < t) {
-      a += delta;
-      f++;
-    }
-
-    if (f === t) {
-      console.debug(a / t);
-      f++;
-    }
   }
 }
 
@@ -374,7 +495,7 @@ function setupStats() {
 
 }
 
-const stats = new Stats();
+const stats = new Graph();
 
 const onAnimationFrame = () => {
   stats.draw();

@@ -282,8 +282,8 @@ const DEFAULT_STATS_OPTIONS: StatsOptions = {
   graphStyle: "gradient",
   lineThickness: 2,
   background: false,
-  width: 500,
-  height: 300,
+  width: 300,
+  height: 100,
   bufferSize: 250,
 }
 
@@ -411,6 +411,36 @@ class Graph {
     this.offscreenGraphContext.strokeStyle = this.options.graphColor;
     this.offscreenGraphContext.lineWidth = this.options.lineThickness * PIXEL_RATIO;
 
+    let max;
+    let min;
+
+    const autoScaleY = false;
+
+    if (autoScaleY) {
+      for (let i = 0; i < this.data.length; i++) {
+        if (max === undefined || this.data[i]! > max) {
+          max = this.data[i];
+        }
+
+        if (min === undefined || this.data[i]! < min) {
+          min = this.data[i];
+        }
+      }
+    } else {
+      max = 800;
+      min = 0;
+    }
+
+    max = max ?? 1;
+    min = min ?? 0;
+
+    const pad = 0;
+    max *= 1 + pad;
+    min *= 1 - pad;
+
+    const range = max - min;
+    const scaling = (this.deviceHeight - this.offscreenGraphContext.lineWidth * 2) / range;
+
     const segmentWidth = (this.deviceWidth / this.options.bufferSize);
 
     let lastX = 0;
@@ -418,7 +448,7 @@ class Graph {
 
     for (let i = this.data.length - 1; i >= 0; i--) {
       const x = this.deviceWidth - (segmentWidth * ((this.data.length - i)));
-      const y = this.deviceHeight - (this.data[i] ?? 0) - this.offscreenGraphContext.lineWidth / 2
+      const y = this.deviceHeight - ((this.data[i] ?? 0) - min) * scaling - this.offscreenGraphContext.lineWidth;
 
       if (i === this.data.length - 1) {
         this.offscreenGraphContext.moveTo(
@@ -426,16 +456,6 @@ class Graph {
           y,
         );
       }
-
-      /*if (this.options.graphStyle !== "line") {
-        this.offscreenGraphContext.fillStyle = this.options.graphStyle === "gradient" ? this.gradient : this.options.graphColor;
-        this.offscreenGraphContext.fillRect(
-          x,
-          y,
-          segmentWidth,
-          this.deviceHeight - y,
-        );
-      }*/
 
       this.offscreenGraphContext.lineTo(
         x,

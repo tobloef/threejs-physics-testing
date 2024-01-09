@@ -19,6 +19,5 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true
   },
-  "include": [
-    "src/*", "engine/*"]
+  "include": ["src/**/*"]
 }

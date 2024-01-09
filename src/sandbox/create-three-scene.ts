@@ -127,8 +127,8 @@ export function createThreeScene() {
   let cubes: Cube[] = [];
 
   let xSize = 10;
-  let ySize = 5;
-  let zSize = 5;
+  let ySize = 10;
+  let zSize = 10;
 
   for (let x = 0; x < xSize; x++) {
     for (let y = 0; y < ySize; y++) {

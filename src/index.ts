@@ -1,5 +1,5 @@
 import {Quaternion, Vector3} from "three";
-import {Graph, GraphOld, StopwatchGraph, TimeGraph} from "./utils/graph/graph.ts";
+import {FrequencyGraph, Graph, GraphOld, StopwatchGraph, TimeGraph} from "./utils/graph/graph.ts";
 import {createThreeScene} from "./sandbox/create-three-scene.ts";
 
 const {world, camera, scene, renderer, cubes, spinningCube} = createThreeScene();
@@ -13,83 +13,19 @@ world.timestep = FIXED_DELTA_TIME;
 let previousTime = 0;
 let timeAccumulator = 0;
 
-const updateGraph = new GraphOld({
-  min: -5,
-  max: 10,
-  height: 50,
-  color: "red",
-  position: {
-    top: 10,
-    left: 0,
-  },
-});
-const fixedUpdateGraph = new GraphOld({
-  min: -5,
-  max: 10,
-  height: 50,
-  color: "green",
-  position: {
-    top: 70,
-    left: 0,
-  },
-});
-
-const graph = new Graph({
-  bounds: {
-    y: {
-      max: 150,
-    }
-  }
-});
-graph.update(400, 0);
-graph.update(300, 200);
-graph.update(200, 0);
-graph.update(100, 100);
-graph.update(0, 0);
-document.body.appendChild(graph.canvas);
-graph.canvas.style.position = "fixed";
-graph.canvas.style.top = "0";
-graph.canvas.style.left = "0";
-graph.canvas.style.width = "300px";
-graph.canvas.style.height = "150px";
-
-const timeGraph = new TimeGraph({
-  style: {
-    fill: "gradient",
-  },
-  bounds: {
-    y: {
-      min: 0,
-      max: 150,
-    }
-  }
-});
-document.body.appendChild(timeGraph.canvas);
-timeGraph.canvas.style.position = "fixed";
-timeGraph.canvas.style.bottom = "0";
-timeGraph.canvas.style.left = "0";
-timeGraph.canvas.style.width = "300px";
-timeGraph.canvas.style.height = "150px";
-
-let i = 0;
-let toggle = false;
-setInterval(() => {
-  timeGraph.update(performance.now(), i);
-
-  if (!toggle && i > 500) {
-    toggle = true;
-  } else if (toggle && i < -500) {
-    toggle = false;
-  }
-
-  if (toggle) {
-    i -= 10;
-  } else {
-    i += 10;
-  }
-}, 20);
-
 const stats = {
+  fps: new FrequencyGraph({
+    style: {
+      color: "orange",
+    },
+    bounds: {
+      y: {
+        min: 0,
+        max: 130,
+      },
+      timeMs: 2000,
+    }
+  }),
   update: new StopwatchGraph({
     style: {
       color: "red",
@@ -97,7 +33,7 @@ const stats = {
     bounds: {
       y: {
         min: 0,
-        max: 2,
+        max: 5,
       },
       timeMs: 2000,
     }
@@ -130,6 +66,13 @@ stats.fixedUpdate.canvas.style.right = "0";
 stats.fixedUpdate.canvas.style.width = "300px";
 stats.fixedUpdate.canvas.style.height = "150px";
 
+document.body.appendChild(stats.fps.canvas);
+stats.fps.canvas.style.position = "fixed";
+stats.fps.canvas.style.bottom = "0";
+stats.fps.canvas.style.left = "0";
+stats.fps.canvas.style.width = "300px";
+stats.fps.canvas.style.height = "150px";
+
 const onAnimationFrame = () => {
   const now = performance.now() / 1000;
 
@@ -154,6 +97,8 @@ const onAnimationFrame = () => {
   stats.update.start();
   update(deltaTime, frameProgress);
   stats.update.stop();
+
+  stats.fps.measure();
 
   requestAnimationFrame(onAnimationFrame);
 }

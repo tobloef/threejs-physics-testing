@@ -374,6 +374,35 @@ export class StopwatchGraph extends TimeGraph {
   }
 }
 
+export class FrequencyGraph extends TimeGraph {
+  private sampleSize: number = 2;
+  private unitMs: number = 1000;
+
+  private samples: Array<[number, number]> = [];
+  private currentFps: number | null = null;
+
+  public measure() {
+    const now = performance.now();
+
+    this.samples.push([now, 0]);
+
+    if (this.samples.length >= this.sampleSize) {
+      const first = this.samples[0]!;
+      const last = this.samples[this.samples.length - 1]!;
+
+      const timeDelta = last[0] - first[0];
+      const frequency = (this.samples.length / timeDelta) * this.unitMs;
+
+      this.currentFps = frequency;
+      this.samples = [];
+    }
+
+    if (this.currentFps !== null) {
+      this.update(now, this.currentFps);
+    }
+  }
+}
+
 export class GraphOld {
   public options: StatsOptions;
   public data: Array<[number, number]> = [];

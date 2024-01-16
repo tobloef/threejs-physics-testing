@@ -49,14 +49,19 @@ export type GraphStyleOptions = {
 type FullGraphOptions = {
   style: GraphStyleOptions,
   autoRender: boolean,
+  gradientDirection?: "vertical" | "horizontal",
   bounds: {
     y?: {
       min?: number,
       max?: number,
+      grow?: boolean,
+      shrink?: boolean,
     },
     x?: {
       min?: number,
       max?: number,
+      grow?: boolean,
+      shrink?: boolean,
     }
   } | undefined,
 }
@@ -188,16 +193,60 @@ export class Graph {
     }
   }
 
+  protected getBound = (
+    defaultBound: number | undefined,
+    findBound: () => number,
+    grow: boolean | undefined,
+    shrink: boolean | undefined,
+  ): number => {
+    if (defaultBound === undefined) {
+      return findBound();
+    }
+
+    if (grow) {
+      return Math.max(defaultBound, findBound());
+    }
+
+    if (shrink) {
+      return Math.min(defaultBound, findBound());
+    }
+
+    return defaultBound;
+  }
+
   protected createDataToCanvasCoordinates(): CoordinatesMapper {
     const findDataMinX = () => this.data.length > 0 ? Math.min(...this.data.map(([x,]) => x)) : -1;
     const findDataMaxX = () => this.data.length > 0 ? Math.max(...this.data.map(([x,]) => x)) : 1;
     const findDataMinY = () => this.data.length > 0 ? Math.min(...this.data.map(([, y]) => y)) : -1;
     const findDataMaxY = () => this.data.length > 0 ? Math.max(...this.data.map(([, y]) => y)) : 1;
 
-    const minX = this.options.bounds?.x?.min ?? findDataMinX();
-    const maxX = this.options.bounds?.x?.max ?? findDataMaxX();
-    const minY = this.options.bounds?.y?.min ?? findDataMinY();
-    const maxY = this.options.bounds?.y?.max ?? findDataMaxY();
+    const minX = this.getBound(
+      this.options.bounds?.x?.min,
+      findDataMinX,
+      this.options.bounds?.x?.shrink,
+      this.options.bounds?.x?.grow,
+    );
+
+    const maxX = this.getBound(
+      this.options.bounds?.x?.max,
+      findDataMaxX,
+      this.options.bounds?.x?.grow,
+      this.options.bounds?.x?.shrink,
+    );
+
+    const minY = this.getBound(
+      this.options.bounds?.y?.min,
+      findDataMinY,
+      this.options.bounds?.y?.shrink,
+      this.options.bounds?.y?.grow,
+    );
+
+    const maxY = this.getBound(
+      this.options.bounds?.y?.max,
+      findDataMaxY,
+      this.options.bounds?.y?.grow,
+      this.options.bounds?.y?.shrink,
+    );
 
     const xRange = maxX - minX;
     const yRange = maxY - minY;
@@ -279,6 +328,8 @@ type FullTimeGraphOptions = Omit<FullGraphOptions, "bounds"> & {
     y?: {
       min?: number,
       max?: number,
+      grow?: boolean,
+      shrink?: boolean,
     },
     timeMs: number
   },
@@ -289,8 +340,10 @@ export type TimeGraphOptions = Omit<GraphOptions, "bounds"> & {
     y?: {
       min?: number,
       max?: number,
+      grow?: boolean,
+      shrink?: boolean,
     },
-    timeMs?: number
+    timeMs?: number,
   },
 }
 
@@ -331,8 +384,18 @@ export class TimeGraph extends Graph {
 
     const minX = now - this.timeOptions.bounds.timeMs;
     const maxX = now;
-    const minY = this.options.bounds?.y?.min ?? findDataMinY();
-    const maxY = this.options.bounds?.y?.max ?? findDataMaxY();
+    const minY = this.getBound(
+      this.options.bounds?.y?.min,
+      findDataMinY,
+      this.options.bounds?.y?.shrink,
+      this.options.bounds?.y?.grow,
+    );
+    const maxY = this.getBound(
+      this.options.bounds?.y?.max,
+      findDataMaxY,
+      this.options.bounds?.y?.grow,
+      this.options.bounds?.y?.shrink,
+    );
 
     const xRange = Math.max(maxX - minX, 1);
     const yRange = Math.max(maxY - minY, 1);
@@ -375,7 +438,7 @@ export class StopwatchGraph extends TimeGraph {
 }
 
 export class FrequencyGraph extends TimeGraph {
-  private sampleSize: number = 2;
+  private sampleSize: number = 60;
   private unitMs: number = 1000;
 
   private samples: Array<[number, number]> = [];
@@ -386,212 +449,20 @@ export class FrequencyGraph extends TimeGraph {
 
     this.samples.push([now, 0]);
 
-    if (this.samples.length >= this.sampleSize) {
+    if (this.samples.length === this.sampleSize) {
       const first = this.samples[0]!;
       const last = this.samples[this.samples.length - 1]!;
 
       const timeDelta = last[0] - first[0];
-      const frequency = (this.samples.length / timeDelta) * this.unitMs;
+      const frequency = (this.samples.length / (timeDelta / this.unitMs));
 
       this.currentFps = frequency;
+
       this.samples = [];
     }
 
     if (this.currentFps !== null) {
       this.update(now, this.currentFps);
-    }
-  }
-}
-
-export class GraphOld {
-  public options: StatsOptions;
-  public data: Array<[number, number]> = [];
-
-  private context: CanvasRenderingContext2D;
-  private readonly deviceWidth: number;
-  private readonly deviceHeight: number;
-  private readonly gradient: CanvasGradient;
-
-  constructor(options?: Partial<StatsOptions>) {
-    this.options = {
-      ...DEFAULT_STATS_OPTIONS,
-      ...removeUndef(options),
-    };
-
-    if (this.options?.background && this.options.backgroundColor === undefined) {
-      const chromeGraphColor = chroma(this.options.color);
-      this.options.backgroundColor = chromeGraphColor.darken(1.5).css();
-    }
-
-    this.deviceWidth = this.options.width * PIXEL_RATIO;
-    this.deviceHeight = this.options.height * PIXEL_RATIO;
-
-    const canvas = this.createCanvasElement();
-    if (this.options.autoAddToDom) {
-      document.body.appendChild(canvas);
-    }
-
-    this.context = this.createCanvasContext(canvas);
-    this.gradient = this.createGradient();
-
-    if (this.options.autoRender) {
-      this.onAnimationFrame();
-    }
-  }
-
-  public update(x: number, y: number) {
-    while (this.data.length > 1 && this.data[1]![0] < x - this.options.bufferLengthSeconds * 1000) {
-      this.data.shift();
-    }
-
-    this.data.push([x, y]);
-  }
-
-  private onAnimationFrame() {
-    this.draw();
-    requestAnimationFrame(this.onAnimationFrame.bind(this));
-  }
-
-  private createCanvasElement(): HTMLCanvasElement {
-    const canvas = document.createElement("canvas");
-
-    canvas.width = this.deviceWidth;
-    canvas.height = this.deviceHeight;
-    canvas.style.width = `${this.deviceWidth / PIXEL_RATIO}px`;
-    canvas.style.height = `${this.deviceHeight / PIXEL_RATIO}px`;
-    canvas.style.position = "fixed";
-    canvas.style.zIndex = "10000";
-
-    if ("top" in this.options.position) {
-      canvas.style.top = `${this.options.position.top}px`;
-    }
-    if ("bottom" in this.options.position) {
-      canvas.style.bottom = `${this.options.position.bottom}px`;
-    }
-    if ("left" in this.options.position) {
-      canvas.style.left = `${this.options.position.left}px`;
-    }
-    if ("right" in this.options.position) {
-      canvas.style.right = `${this.options.position.right}px`;
-    }
-
-    return canvas;
-  }
-
-  private createCanvasContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
-    const context = canvas.getContext("2d");
-
-    if (context === null) {
-      throw new Error("Canvas context could not be created.");
-    }
-
-    context.font = `bold ${12 * PIXEL_RATIO}px monospace`;
-
-    return context;
-  }
-
-  private createGradient(): CanvasGradient {
-    const gradient = this.context.createLinearGradient(
-      0,
-      0,
-      0,
-      this.deviceHeight,
-    );
-
-    const chromeGraphColor = chroma(this.options.color);
-
-    gradient.addColorStop(0, chromeGraphColor.alpha(1).css());
-    gradient.addColorStop(1, chromeGraphColor.alpha(0).css());
-
-    return gradient;
-  }
-
-  draw() {
-    this.context.clearRect(0, 0, this.deviceWidth, this.deviceHeight);
-
-    this.context.beginPath();
-    this.context.strokeStyle = this.options.color;
-    this.context.lineWidth = this.options.lineThickness * PIXEL_RATIO;
-
-    const yValues = this.data.map(([, y]) => y);
-
-    let minY = this.options.min;
-    if (yValues.length > 0) minY ??= Math.min(...yValues);
-    minY ??= 0;
-
-    let maxY = this.options.max;
-    if (yValues.length > 0) maxY ??= Math.max(...yValues);
-    maxY ??= 1;
-
-    const range = maxY - minY;
-
-    const paddingX = 0;
-    const paddingY = 10;
-    const width = this.deviceWidth - (paddingX * 2);
-    const height = this.deviceHeight - (paddingY * 2);
-
-    const scaling = (height - this.context.lineWidth * 2) / range;
-
-    let lastX = 0;
-    let lastY = 0;
-
-    if (this.data.length > 0) {
-      const now = performance.now();
-      for (let i = this.data.length - 1; i >= 0; i--) {
-        const [xData, yData] = this.data[i]!;
-
-        const x = (1 - (((now - xData) / 1000) / this.options.bufferLengthSeconds)) * width;
-        const y = -paddingY + this.deviceHeight - ((yData ?? 0) - minY) * scaling - this.context.lineWidth;
-
-        if (i === this.data.length - 1) {
-          this.context.moveTo(
-            width,
-            y,
-          );
-        }
-
-        this.context.lineTo(
-          x,
-          y,
-        );
-
-        lastX = x;
-        lastY = y;
-      }
-
-      if (this.options.graphStyle !== "line") {
-        this.context.lineTo(
-          lastX - this.context.lineWidth,
-          lastY,
-        );
-        this.context.lineTo(
-          lastX - this.context.lineWidth,
-          this.deviceHeight + this.context.lineWidth,
-        );
-        this.context.lineTo(
-          this.deviceWidth + this.context.lineWidth,
-          this.deviceHeight + this.context.lineWidth,
-        );
-        this.context.lineTo(
-          this.deviceWidth + this.context.lineWidth,
-          lastY,
-        );
-      }
-
-      this.context.fillStyle = this.options.graphStyle === "gradient"
-        ? this.gradient
-        : this.options.color;
-
-      this.context.stroke();
-      if (this.options.graphStyle !== "line") {
-        this.context.fill()
-        this.context.clearRect(
-          lastX - this.context.lineWidth * 2,
-          0,
-          this.context.lineWidth * 2,
-          this.deviceHeight,
-        );
-      }
     }
   }
 }

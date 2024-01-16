@@ -1,5 +1,5 @@
 import {Quaternion, Vector3} from "three";
-import {FrequencyGraph, Graph, GraphOld, StopwatchGraph, TimeGraph} from "./utils/graph/graph.ts";
+import {FrequencyGraph, StopwatchGraph} from "./utils/graph/graph.ts";
 import {createThreeScene} from "./sandbox/create-three-scene.ts";
 
 const {world, camera, scene, renderer, cubes, spinningCube} = createThreeScene();
@@ -16,36 +16,45 @@ let timeAccumulator = 0;
 const stats = {
   fps: new FrequencyGraph({
     style: {
+      fill: "gradient",
+      lineThickness: 4,
       color: "orange",
     },
     bounds: {
       y: {
         min: 0,
-        max: 130,
+        max: 70,
+        grow: true,
       },
       timeMs: 2000,
     }
   }),
   update: new StopwatchGraph({
     style: {
+      fill: "gradient",
+      lineThickness: 4,
       color: "red",
     },
     bounds: {
       y: {
         min: 0,
         max: 5,
+        grow: true,
       },
       timeMs: 2000,
     }
   }),
   fixedUpdate: new StopwatchGraph({
     style: {
+      fill: "gradient",
+      lineThickness: 4,
       color: "green",
     },
     bounds: {
       y: {
         min: 0,
-        max: 10,
+        max: 5,
+        grow: true,
       },
       timeMs: 2000,
     }
@@ -74,10 +83,10 @@ stats.fps.canvas.style.width = "300px";
 stats.fps.canvas.style.height = "150px";
 
 const onAnimationFrame = () => {
-  const now = performance.now() / 1000;
+  const nowSeconds = performance.now() / 1000;
 
-  let deltaTime = now - previousTime;
-  previousTime = now;
+  let deltaTime = nowSeconds - previousTime;
+  previousTime = nowSeconds;
 
   if (deltaTime > MAX_DELTA_TIME) {
     deltaTime = MAX_DELTA_TIME;

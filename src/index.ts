@@ -486,6 +486,42 @@ class Graph {
   }
 }
 
+class TimeGraph {
+  public durationSeconds: number;
+
+
+
+  public add(time: number, y: number) {
+
+  }
+}
+
+class TimerGraph {
+  private graph: TimeGraph;
+  private beginTime: number = 0;
+
+  constructor() {
+    this.graph = new TimeGraph();
+  }
+
+  public begin() {
+    this.beginTime = performance.now();
+  }
+
+  public end() {
+    const endTime = performance.now();
+    const deltaTime = endTime - this.beginTime;
+    this.graph.add(this.beginTime, deltaTime);
+    this.graph.add(endTime, deltaTime);
+  }
+}
+
+class FrequencyGraph {
+  public measure() {
+    // TODO: Rolling min, max, average
+  }
+}
+
 let updateBeginTime: number;
 let fixedUpdateBeginTime: number;
 
